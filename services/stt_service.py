@@ -20,10 +20,10 @@ client = AsyncGroq(api_key=GROQ_API_KEY, timeout=60.0)
 # and is one of the cheapest/most generous Whisper offerings available.
 STT_MODEL = os.environ.get("GROQ_STT_MODEL", "whisper-large-v3-turbo")
 
-# Optional ISO-639-1 language hint (e.g. "zh", "en"). Providing this improves
+# Optional ISO-639-1 language hint (e.g. "en", "zh"). Providing this improves
 # transcription accuracy and speed versus letting Whisper auto-detect the
 # language on every request. Leave unset/empty to auto-detect.
-STT_LANGUAGE = os.environ.get("GROQ_STT_LANGUAGE", "zh") or None
+STT_LANGUAGE = os.environ.get("GROQ_STT_LANGUAGE", "en") or None
 
 
 def _read_file_bytes(path: str) -> bytes:
