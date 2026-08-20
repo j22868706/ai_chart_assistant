@@ -1,127 +1,278 @@
 # AI Chart Assistant — Voice-to-SOAP Note Telegram Bot
 
-An AI-powered clinical documentation assistant that turns a spoken consultation
-into a structured SOAP note, delivered directly inside Telegram.
+An AI-powered clinical documentation assistant that converts spoken therapy-session summaries into structured SOAP notes and delivers them directly through Telegram.
+
+Built to address a practical documentation challenge in home health rehabilitation, where therapists often travel between patient visits without immediate access to a workstation.
 
 ▶️ **[Watch the Demo Video on YouTube](https://www.youtube.com/shorts/8v_rkPxsisM)**
 
 ---
 
-## The Problem
+## Overview
 
-Home health therapists (physical therapy, occupational therapyetc.) spend a 
-significant portion of their working day commuting between clients' homes. 
-Unlike clinic-based practitioners, they don't have a desk between sessions
-to sit down and write notes.
+**AI Chart Assistant** is an asynchronous, voice-driven clinical documentation pipeline.
 
-In practice, this leaves two bad options:
+A therapist can record a short voice summary of a therapy session and send it to the Telegram bot. The system automatically:
 
-1. **Write the note during the session** — pulling focus away from the client to
-   type or write, which reduces the quality of hands-on time and can feel
-   impersonal or rushed to the patient.
-2. **Write the note after getting home** — piling up documentation for multiple
-   visits, often done late at night, extending the effective work day well beyond
-   billed clinical hours and increasing burnout risk.
+1. Receives the Telegram voice message through a webhook
+2. Downloads and temporarily stores the audio file
+3. Converts speech to text using Groq Whisper
+4. Transforms the transcript into a structured SOAP note using an LLM
+5. Returns both the transcript and generated SOAP draft to Telegram
+6. Deletes the temporary audio file after processing
 
-Either way, the therapist is trading either **care quality** or **personal time**
-to keep up with documentation — and the commute time in between sessions is
-completely wasted from a documentation standpoint.
-
-## The Solution
-
-This bot lets a therapist **dictate a quick voice summary of the session while
-commuting** — in their own words, no special format needed — and send it as a
-Telegram voice message. The bot:
-
-1. Transcribes the voice note (speech-to-text)
-2. Uses an LLM to reorganize the transcript into a structured **SOAP note**
-   (Subjective / Objective / Assessment / Plan)
-3. Sends both the transcript and the SOAP draft back to the therapist in chat,
-   ready to review, lightly edit, and paste into the clinic's official EHR/chart
-   system
-
-The commute — dead time in the old workflow — becomes documentation time, without
-taking anything away from the actual session with the client.
-
-**Important:** this tool produces a **draft only**. It is a documentation
-accelerator, not a replacement for clinical judgment or the official medical
-record. See [Privacy & Compliance](#privacy--compliance-important) below.
+The generated SOAP note is intended as a **draft for clinician review**, not a replacement for clinical judgment or the official medical record.
 
 ---
 
-## How It Works (Architecture)
+## The Problem
 
+Home health therapists often spend significant time traveling between patient visits.
+
+Unlike clinic-based practitioners, they may not have immediate access to a workstation between sessions, making clinical documentation difficult to complete efficiently.
+
+This creates two common workflows:
+
+### 1. Document during the session
+
+Typing or writing notes during patient care can interrupt the therapist's interaction with the patient and reduce hands-on treatment time.
+
+### 2. Document after returning home
+
+Multiple unfinished notes can accumulate throughout the day, extending documentation into personal time and increasing administrative burden.
+
+The goal of this project is to turn otherwise unused commute time into an opportunity for documentation **without interrupting patient care**.
+
+---
+
+## Solution
+
+The therapist can dictate a short summary immediately after a session using natural language.
+
+For example:
+
+> "Patient reported mild shoulder pain today. We performed shoulder strengthening and range-of-motion exercises. Patient required verbal cues during functional transfers because of decreased balance."
+
+The system converts the spoken summary into a structured clinical note:
+
+```text
+Subjective:
+Patient reported mild shoulder pain.
+
+Objective:
+Patient participated in shoulder strengthening and ROM exercises.
+Verbal cues were required during functional transfers.
+
+Assessment:
+Patient continues to demonstrate impaired balance affecting
+functional mobility and transfer performance.
+
+Plan:
+Continue therapeutic exercises, balance training, and functional
+transfer training.
 ```
-Therapist (commuting)
-      │  sends voice message
-      ▼
-┌─────────────────┐
-│   Telegram Bot   │
-└─────────────────┘
-      │  webhook (POST /webhook)
-      ▼
-┌───────────────────────────────────────────────────────────┐
-│                     FastAPI application                     │
-│                                                               │
-│  1. Verify webhook secret token (optional but recommended)  │
-│  2. Return 200 immediately, hand off to a background task   │
-│     (avoids Telegram webhook timeout / duplicate delivery)  │
-│                                                               │
-│  Background task:                                            │
-│  3. Download the voice file from Telegram (.ogg)             │
-│     → saved with a unique filename to avoid collisions       │
-│     between concurrent requests                              │
-│  4. Speech-to-Text via Groq Whisper (whisper-large-v3-turbo) │
-│  5. SOAP note generation via Groq LLM (openai/gpt-oss-120b)  │
-│  6. Send transcript + SOAP draft back to the user            │
-│     (auto-split if over Telegram's 4096-char message limit)  │
-│  7. Delete the temporary audio file (always, via `finally`)  │
-└───────────────────────────────────────────────────────────┘
-      │
-      ▼
-Telegram chat: transcript + SOAP note draft
+
+The therapist can then review and edit the generated draft before entering it into the organization's official documentation system.
+
+---
+
+## System Architecture
+
+```text
+                 Therapist
+                     │
+                     │ Voice Message
+                     ▼
+             ┌─────────────────┐
+             │  Telegram Bot   │
+             └────────┬────────┘
+                      │
+                      │ POST /webhook
+                      ▼
+             ┌────────────────────────┐
+             │      FastAPI App       │
+             │                        │
+             │  1. Verify webhook     │
+             │     secret             │
+             │                        │
+             │  2. Return HTTP 200    │
+             │     immediately        │
+             │                        │
+             │  3. Background task    │
+             └───────────┬────────────┘
+                         │
+                         ▼
+               Download Telegram Audio
+                         │
+                         ▼
+              ┌─────────────────────┐
+              │ Groq Whisper        │
+              │ whisper-large-v3-   │
+              │ turbo               │
+              └──────────┬──────────┘
+                         │
+                         ▼
+                    Transcript
+                         │
+                         ▼
+              ┌─────────────────────┐
+              │ Groq LLM            │
+              │ openai/gpt-oss-120b │
+              └──────────┬──────────┘
+                         │
+                         ▼
+                    SOAP Draft
+                         │
+                         ▼
+                Telegram Response
+                         │
+                         ▼
+              Temporary Audio Deleted
 ```
 
-### Why this design
+---
 
-- **Background tasks, not inline processing** — STT + LLM generation can take
-  several seconds. If the webhook handler waited for the full pipeline before
-  responding, Telegram could time out and re-send the same update, causing the
-  same voice note to be processed (and billed) twice. The handler now returns
-  `200 OK` immediately and does the real work in a `BackgroundTasks` job.
-- **Unique temp filenames** — the original design used a hardcoded
-  `temp_voice.ogg`, which meant two therapists (or two messages from the same
-  therapist) arriving close together could overwrite each other's audio file.
-  Every request now gets a `uuid4()`-based filename.
-- **Async Groq client everywhere** — the LLM and STT calls use `AsyncGroq`
-  rather than the synchronous `Groq` client, so a slow API call doesn't block
-  the FastAPI event loop for other in-flight requests.
-- **`finally`-guaranteed cleanup** — the temporary audio file is deleted whether
-  the pipeline succeeds or fails, so voice recordings never accumulate on disk.
-  (For crash-level resilience beyond normal exceptions — e.g. the process being
-  force-killed — a startup/cron cleanup of the `temp_audio/` directory is a
-  reasonable future addition.)
-- **Rate-limit-aware error handling** — Groq's free tier enforces per-minute /
-  per-day request and token caps. Hitting them raises `groq.RateLimitError`,
-  which is caught specifically and turned into a friendly "please try again in
-  a few minutes" message instead of a raw stack trace being shown to the user.
-- **Webhook secret token (optional)** — Telegram supports a `secret_token` on
-  `setWebhook`; if configured, the app verifies the
-  `X-Telegram-Bot-Api-Secret-Token` header, preventing arbitrary third parties
-  from POSTing fake voice-note payloads to the public `/webhook` URL.
+## Key Engineering Decisions
+
+### Asynchronous Webhook Processing
+
+Speech-to-text and LLM inference can take several seconds.
+
+Instead of keeping the Telegram webhook request open during the entire AI pipeline, the application:
+
+1. Receives the webhook
+2. Returns `200 OK` immediately
+3. Hands the processing pipeline to a FastAPI background task
+
+This prevents Telegram webhook timeouts and reduces the risk of duplicate processing.
+
+---
+
+### Async API Clients
+
+The application uses asynchronous clients for external API requests.
+
+```text
+Telegram
+   │
+   ▼
+FastAPI
+   │
+   ├── Async Telegram API
+   │
+   ├── Async Groq STT
+   │
+   └── Async Groq LLM
+```
+
+This prevents slow external API calls from unnecessarily blocking the FastAPI event loop.
+
+---
+
+### Unique Temporary Audio Files
+
+Each incoming voice message receives a unique `uuid4()` filename.
+
+Instead of:
+
+```text
+temp_voice.ogg
+```
+
+the system creates unique temporary files such as:
+
+```text
+temp_audio/
+├── 2f5c...a91.ogg
+├── 9d21...f34.ogg
+└── 7ab4...c82.ogg
+```
+
+This prevents concurrent requests from overwriting each other's audio files.
+
+---
+
+### Guaranteed Temporary File Cleanup
+
+Temporary recordings are removed inside a `finally` block.
+
+```text
+Request
+   │
+   ▼
+Download audio
+   │
+   ▼
+Speech-to-text
+   │
+   ▼
+SOAP generation
+   │
+   ▼
+Send response
+   │
+   ▼
+finally → Delete audio
+```
+
+This ensures temporary recordings are deleted after both successful and failed processing paths.
+
+---
+
+### Rate-Limit-Aware Error Handling
+
+External AI APIs may return rate-limit errors.
+
+Instead of exposing raw exceptions to the user, the application catches rate-limit failures and returns a user-friendly response.
+
+```text
+Groq API
+   │
+   ├── Success → Continue pipeline
+   │
+   └── Rate Limit → Friendly retry message
+```
+
+This provides a better user experience while preventing implementation details from being exposed to end users.
+
+---
+
+### Telegram Webhook Security
+
+The application optionally supports Telegram's webhook secret token.
+
+When configured, the application validates:
+
+```text
+X-Telegram-Bot-Api-Secret-Token
+```
+
+before processing incoming webhook requests.
+
+This reduces the risk of arbitrary requests being sent to the public webhook endpoint.
 
 ---
 
 ## Project Structure
 
-```
+```text
 soap-note-bot/
-├── main.py                  # FastAPI app: Telegram webhook + background pipeline
+│
+├── main.py
+│   └── FastAPI application, Telegram webhook,
+│       background processing pipeline
+│
 ├── services/
-│   ├── stt_service.py       # Speech-to-text via Groq Whisper
-│   └── llm_service.py       # SOAP note generation via Groq LLM
+│   ├── stt_service.py
+│   │   └── Speech-to-text service
+│   │
+│   └── llm_service.py
+│       └── SOAP note generation
+│
 ├── utils/
-│   └── prompts.py           # CLINICAL_SOAP_PROMPT template
+│   └── prompts.py
+│       └── Clinical SOAP prompt template
+│
 ├── requirements.txt
 ├── Dockerfile
 ├── .dockerignore
@@ -134,133 +285,282 @@ soap-note-bot/
 
 ## Tech Stack
 
-| Layer | Choice | Why |
-|---|---|---|
-| API framework | FastAPI + Uvicorn | Async-native, minimal boilerplate for a webhook receiver |
-| Messaging | Telegram Bot API (via `httpx`) | Free, ubiquitous, works well on mobile for voice messages |
-| Speech-to-text | Groq — `whisper-large-v3-turbo` | Free tier is generous (~2,000 requests/day), very fast inference |
-| SOAP note generation | Groq — `openai/gpt-oss-120b` | Free tier available, fast inference, replaces the now-deprecated `llama-3.3-70b-versatile` |
-| HTTP client | `httpx` (async) | Non-blocking calls to the Telegram API |
+| Layer            | Technology                 | Purpose                        |
+| ---------------- | -------------------------- | ------------------------------ |
+| Backend          | Python                     | Application development        |
+| API Framework    | FastAPI                    | Asynchronous webhook server    |
+| Server           | Uvicorn                    | ASGI application server        |
+| Messaging        | Telegram Bot API           | Voice-message interface        |
+| HTTP Client      | httpx                      | Asynchronous API communication |
+| Speech-to-Text   | Groq Whisper               | Voice transcription            |
+| LLM              | Groq `openai/gpt-oss-120b` | SOAP note generation           |
+| Containerization | Docker                     | Reproducible deployment        |
+| Deployment       | Render / Railway           | Cloud hosting                  |
 
 ---
 
-## Setup
+## End-to-End Workflow
 
-### 1. Install dependencies
+### Step 1 — Voice Input
+
+The therapist records a voice summary through Telegram.
+
+### Step 2 — Webhook Reception
+
+Telegram sends the voice-message event to:
+
+```text
+POST /webhook
+```
+
+The application validates the request and immediately returns `200 OK`.
+
+### Step 3 — Background Processing
+
+FastAPI processes the voice message asynchronously.
+
+The audio file is downloaded and stored temporarily with a unique filename.
+
+### Step 4 — Speech Recognition
+
+The audio is sent to:
+
+```text
+Groq Whisper
+whisper-large-v3-turbo
+```
+
+The resulting transcript becomes the input for the clinical documentation pipeline.
+
+### Step 5 — SOAP Generation
+
+The transcript is passed to the LLM with a clinical SOAP prompt.
+
+The model organizes the information into:
+
+* Subjective
+* Objective
+* Assessment
+* Plan
+
+### Step 6 — Response
+
+The bot sends the therapist:
+
+```text
+Transcript
+
++
+
+SOAP Note Draft
+```
+
+Long responses are automatically split to respect Telegram's message-length limitations.
+
+### Step 7 — Cleanup
+
+The temporary audio recording is deleted after processing.
+
+---
+
+## Local Development
+
+### 1. Clone the repository
+
+```bash
+git clone <your-repository-url>
+cd soap-note-bot
+```
+
+### 2. Create a virtual environment
 
 ```bash
 python -m venv venv
-source venv/bin/activate   # Windows: venv\Scripts\activate
+```
+
+Activate it:
+
+```bash
+# macOS / Linux
+source venv/bin/activate
+
+# Windows
+venv\Scripts\activate
+```
+
+### 3. Install dependencies
+
+```bash
 pip install -r requirements.txt
 ```
 
-### 2. Configure environment variables
+### 4. Configure environment variables
 
-```bash
-cp .env.example .env
+Create a `.env` file:
+
+```env
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+GROQ_API_KEY=your_groq_api_key
+
+TELEGRAM_WEBHOOK_SECRET=your_random_secret
+
+GROQ_STT_MODEL=whisper-large-v3-turbo
+GROQ_STT_LANGUAGE=zh
+GROQ_LLM_MODEL=openai/gpt-oss-120b
 ```
 
-Fill in `.env`:
-
-| Variable | Description |
-|---|---|
-| `TELEGRAM_BOT_TOKEN` | From [@BotFather](https://t.me/BotFather) |
-| `GROQ_API_KEY` | From [Groq Console](https://console.groq.com) |
-| `TELEGRAM_WEBHOOK_SECRET` | Optional. Any random string; used to verify webhook requests |
-| `GROQ_STT_MODEL` | Optional, default `whisper-large-v3-turbo` |
-| `GROQ_STT_LANGUAGE` | Optional, default `zh`. ISO-639-1 language hint for transcription; leave empty to auto-detect |
-| `GROQ_LLM_MODEL` | Optional, default `openai/gpt-oss-120b` |
-
-### 3. Run locally
+### 5. Start the application
 
 ```bash
 uvicorn main:app --reload --port 8000
 ```
 
-### 4. Expose it to Telegram (local testing)
+### 6. Test the webhook locally
 
-Telegram needs a public HTTPS URL to send webhooks to. Use a tunnel like ngrok
-during development:
+Telegram requires a publicly accessible HTTPS endpoint for webhooks.
+
+For local development, a tunneling service such as ngrok can be used:
 
 ```bash
 ngrok http 8000
 ```
 
-Then register the webhook:
+Register the webhook:
 
 ```bash
-curl -X POST "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
+curl -X POST \
+  "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
   -d "url=https://<your-ngrok-domain>/webhook" \
-  -d "secret_token=<your TELEGRAM_WEBHOOK_SECRET>"
+  -d "secret_token=<TELEGRAM_WEBHOOK_SECRET>"
 ```
 
-Send a voice message to your bot on Telegram — it should reply with a
-transcript and a SOAP note draft.
+Send a voice message to the Telegram bot to test the complete pipeline.
 
 ---
 
-## Deploying So It Runs Without Your Laptop
+## Docker
 
-Running the bot locally only works while your machine is on and the tunnel is
-active — not practical for daily clinical use. 
+The project includes a `Dockerfile` for containerized deployment.
 
-| Platform | Cost | Trade-off |
-|---|---|---|
-| **Render** | Free (no credit card) | Free web services sleep after 15 min of inactivity; a ~30–50s cold start on the next request. Mitigated by pinging `/health` every ~10 min with a free uptime monitor (e.g. cron-job.org), which keeps it awake and still stays within the free 750 hrs/month. |
-| **Railway** | ~$5/month (Hobby) | Always-on, no sleep, simplest developer experience if a small monthly cost is acceptable. |
+Build the image:
 
-A `Dockerfile` is included so the same container can be deployed to either
-platform (or any other container host) without changes. Both platforms deploy
-automatically from a GitHub push.
+```bash
+docker build -t soap-note-bot .
+```
 
----
+Run the container:
 
-## Cost: Designed to Run for Free
+```bash
+docker run -p 8000:8000 --env-file .env soap-note-bot
+```
 
-Both Groq models used by default are within Groq's free tier (no credit card
-required):
-
-| Service | Approximate free allowance |
-|---|---|
-| `openai/gpt-oss-120b` (SOAP note generation) | ~30 requests/min, ~1,000 requests/day, ~200K tokens/day |
-| `whisper-large-v3-turbo` (speech-to-text) | ~2,000 transcription requests/day |
-
-For a single therapist's daily commute usage, this is comfortably within the
-free allowance. If usage ever exceeds it, Groq returns HTTP 429 — the app
-catches this specifically and replies with a friendly "please try again in a
-few minutes" message rather than an error trace.
-
-Hosting can also be free (Render's free tier, see above), so the entire stack
-can run at **$0/month** for individual or small-practice use.
+The same container can be deployed to a cloud container platform without changing the application code.
 
 ---
 
-## Privacy & Compliance (Important)
+## Deployment
 
-This bot handles **voice recordings and clinical content about real patients**.
-Before using it for real client sessions, be aware:
+The application can be deployed to platforms such as:
 
-- **No encryption-at-rest or access control is implemented in this codebase.**
-  Voice files are downloaded to local/ephemeral disk, processed, and deleted
-  immediately after each request — but the Telegram bot itself has no patient
-  consent flow, audit log, or role-based access control.
-- Before using this for real patients, consider adding, depending on your
-  jurisdiction (e.g. Taiwan's Personal Data Protection Act, HIPAA, GDPR):
-  - Encryption in transit and at rest
-  - Access control and audit logging
-  - Patient consent / notification that a voice note is being processed by AI
-  - A defined data retention and deletion policy
-- Restrict who can talk to the bot (e.g. only add your own clinical staff to
-  it) rather than leaving it open to the public.
+* Render
+* Railway
+* Other Docker-compatible cloud platforms
+
+A typical production flow is:
+
+```text
+GitHub
+   │
+   ▼
+Cloud Platform
+   │
+   ▼
+Docker Container
+   │
+   ▼
+FastAPI + Uvicorn
+   │
+   ▼
+Telegram Webhook
+```
 
 ---
 
-## Roadmap / Possible Improvements
+## Cost Optimization
 
-- [ ] Startup/cron cleanup of `temp_audio/` to guard against files left behind
-      by a hard process crash (the `finally` block already covers normal
-      success/failure paths)
-- [ ] Multi-therapist support with per-user identification/authentication
-- [ ] Direct export to common EHR formats
-- [ ] Configurable note templates beyond SOAP (e.g. DAP, BIRP)
-- [ ] Patient/session linking so notes can be grouped by client automatically
+The application was designed around services with free-tier availability during development.
+
+The architecture minimizes infrastructure requirements by using:
+
+* Serverless-style webhook processing
+* External speech-to-text inference
+* External LLM inference
+* Docker-based deployment
+* Temporary local storage
+* No database requirement for the initial version
+
+This makes the prototype suitable for experimentation and small-scale individual use.
+
+Actual API quotas and pricing may change over time, so production deployments should verify the current provider limits.
+
+---
+
+## Privacy & Compliance
+
+**This project is a technical prototype and should not be used with real patient information without appropriate security, privacy, and compliance controls.**
+
+The application processes potentially sensitive clinical information and voice recordings.
+
+The current implementation does **not** provide a complete production-grade healthcare security model.
+
+Important considerations before processing real patient data include:
+
+* Encryption in transit and at rest
+* Authentication and authorization
+* Role-based access control
+* Audit logging
+* Patient consent and notification
+* Data retention and deletion policies
+* Secure secrets management
+* Vendor and API compliance requirements
+* HIPAA/GDPR/local privacy-law considerations where applicable
+
+The current implementation temporarily stores voice recordings during processing and deletes them after the pipeline completes.
+
+The generated SOAP note should always be reviewed by a qualified clinician before being entered into an official medical record.
+
+---
+
+## Roadmap
+
+* [ ] Add authentication and multi-therapist support
+* [ ] Add persistent user/session management
+* [ ] Add encrypted storage
+* [ ] Add audit logging
+* [ ] Add automatic startup cleanup for orphaned audio files
+* [ ] Add configurable documentation templates
+* [ ] Support DAP and BIRP notes
+* [ ] Add patient/session linking
+* [ ] Add structured EHR export
+* [ ] Add production-grade monitoring and observability
+* [ ] Add automated tests for the complete processing pipeline
+
+---
+
+## Why I Built This
+
+As an occupational therapist transitioning into software engineering, I built this project around a real clinical documentation workflow.
+
+The goal was not only to demonstrate LLM integration, but to solve a practical problem while applying software engineering principles such as:
+
+* Asynchronous API design
+* Webhook processing
+* External API integration
+* Error handling
+* Concurrency safety
+* Temporary file management
+* Containerization
+* Cloud deployment
+* Security and privacy considerations
+
+This project represents the intersection of **healthcare domain knowledge and software engineering**.
