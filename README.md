@@ -7,9 +7,9 @@ into a structured SOAP note, delivered directly inside Telegram.
 
 ## The Problem
 
-Home-visit therapists (physical therapy, occupational therapy, home-care nursing,
-etc.) spend a significant portion of their working day commuting between clients'
-homes. Unlike clinic-based practitioners, they don't have a desk between sessions
+Home health therapists (physical therapy, occupational therapyetc.) spend a 
+significant portion of their working day commuting between clients' homes. 
+Unlike clinic-based practitioners, they don't have a desk between sessions
 to sit down and write notes.
 
 In practice, this leaves two bad options:
@@ -124,8 +124,7 @@ soap-note-bot/
 ├── Dockerfile
 ├── .dockerignore
 ├── .gitignore
-├── .env.example
-├── DEPLOY.md                 # Step-by-step deployment guide
+├── .env
 └── README.md
 ```
 
@@ -201,8 +200,7 @@ transcript and a SOAP note draft.
 ## Deploying So It Runs Without Your Laptop
 
 Running the bot locally only works while your machine is on and the tunnel is
-active — not practical for daily clinical use. See **[DEPLOY.md](./DEPLOY.md)**
-for full step-by-step instructions. Summary:
+active — not practical for daily clinical use. 
 
 | Platform | Cost | Trade-off |
 |---|---|---|
@@ -211,8 +209,7 @@ for full step-by-step instructions. Summary:
 
 A `Dockerfile` is included so the same container can be deployed to either
 platform (or any other container host) without changes. Both platforms deploy
-automatically from a GitHub push — see `DEPLOY.md` for the full walkthrough,
-including how to re-point the Telegram webhook at the deployed URL.
+automatically from a GitHub push.
 
 ---
 
@@ -236,50 +233,11 @@ can run at **$0/month** for individual or small-practice use.
 
 ---
 
-## Troubleshooting
-
-### `groq.NotFoundError: 404 model_not_found`
-
-Groq periodically deprecates older models. `llama-3.3-70b-versatile` was
-deprecated on 2026-06-17; this project defaults to `openai/gpt-oss-120b`
-instead. If you see this error for any model, check the current list:
-
-```bash
-curl https://api.groq.com/openai/v1/models \
-  -H "Authorization: Bearer $GROQ_API_KEY" | jq '.data[].id'
-```
-
-or see the [Groq models page](https://console.groq.com/docs/models).
-
-### `AttributeError: 'AsyncGroq' object has no attribute 'audio'`
-
-Your installed `groq` SDK version predates the audio transcription API
-(introduced with SDK v1.0.0, December 2025). Upgrade:
-
-```bash
-pip install -U groq
-pip show groq   # confirm version >= 1.2.0
-```
-
-### `RuntimeError: Groq free-tier usage limit reached`
-
-You've hit Groq's free-tier rate limit (requests or tokens per minute/day).
-This is handled gracefully — the user just needs to wait a few minutes and
-retry. If this happens often in real use, consider adding a payment method on
-Groq to move to paid-tier limits.
-
----
-
 ## Privacy & Compliance (Important)
 
 This bot handles **voice recordings and clinical content about real patients**.
 Before using it for real client sessions, be aware:
 
-- **AI-generated SOAP notes are drafts only.** Every reply includes a reminder
-  that the note must be reviewed and confirmed by a licensed clinician before
-  it is used as, or copied into, the official medical record. The prompt
-  (`utils/prompts.py`) explicitly instructs the model not to invent findings
-  that weren't mentioned in the transcript.
 - **No encryption-at-rest or access control is implemented in this codebase.**
   Voice files are downloaded to local/ephemeral disk, processed, and deleted
   immediately after each request — but the Telegram bot itself has no patient
