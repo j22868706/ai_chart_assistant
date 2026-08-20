@@ -1,0 +1,8 @@
+.env
+venv/
+__pycache__/
+*.pyc
+temp_audio/
+.git/
+.gitignore
+README.md
