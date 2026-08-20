@@ -3,6 +3,8 @@
 An AI-powered clinical documentation assistant that turns a spoken consultation
 into a structured SOAP note, delivered directly inside Telegram.
 
+▶️ **[Watch the Demo Video on YouTube](https://www.youtube.com/shorts/8v_rkPxsisM)**
+
 ---
 
 ## The Problem
