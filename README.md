@@ -2,6 +2,8 @@
 
 A Telegram bot that turns spoken therapy-session summaries into **English SOAP
 drafts**, while returning the source-language transcript for clinician review.
+Provide the session's **S and O**; the AI organizes these facts and drafts an
+evidence-based **A and suggested P**, so the result contains all four sections.
 
 Built by an occupational therapist transitioning into software engineering to
 address a practical home-health rehabilitation workflow: documenting visits when
@@ -50,15 +52,25 @@ O:
 Patient completed 2 sets of 10 shoulder exercises.
 
 A:
-Assessment not provided in the transcript; clinician review required.
+AI-assisted assessment draft: Right shoulder pain is reported alongside
+completion of shoulder exercises. The effect of pain on performance and
+response to exercise is unspecified; exercise completion alone does not
+establish improvement or treatment tolerance.
 
 P:
-Plan not provided in the transcript; clinician review required.
+Suggested plan for clinician review: Reassess right shoulder symptoms and
+their effect during the documented exercises before considering progression.
+Clarify the patient's functional concerns to guide a task-specific plan.
 ```
 
-Missing assessment and plan information stays missing. Completed exercises do not
-establish a future treatment plan, and missing symptoms do not mean symptoms were
-denied. The clinician must verify the draft and supply missing information.
+S and O remain source facts. When A/P are not dictated, the AI drafts an
+interpretation and proposed next steps grounded in S/O, with the labels shown
+above. Suggested care is not an existing treatment order or proof it occurred.
+Missing symptoms do not mean symptoms were denied. If the evidence is too sparse,
+the draft identifies what needs clarification rather than inventing findings,
+diagnoses, treatment doses, or prescribed visit frequency. The clinician must
+review and edit A/P before using the note. This is an illustrative response,
+not a live model-quality evaluation of the updated policy.
 
 ## Architecture
 
@@ -118,6 +130,24 @@ requires preservation of numbers, units, laterality, negation, assistance levels
 attribution, and uncertainty. Contradictions stay visible for clarification;
 unclear details must not be guessed. Role separation and prompt instructions do
 not guarantee factual accuracy or resistance to prompt injection.
+
+### S/O input, complete SOAP draft
+
+The clinician can dictate only Subjective and Objective information, in one
+recording without explicit section labels. The model keeps reported information
+in S and observed/measured information in O, then generates a grounded assessment
+and suggested plan. Generated A starts with `AI-assisted assessment draft:` and
+generated P starts with `Suggested plan for clinician review:`. Explicitly
+supplied assessments/plans are preserved, with AI additions distinguished.
+
+Assessment inferences must identify supporting S/O evidence and uncertainty.
+Progress requires an explicit comparison. Suggested plans must address the
+reported symptoms or documented tasks, remain conditional on clinician review,
+and avoid invented diagnoses, orders, exercise doses, visit frequency, or HEP.
+Sparse or contradictory S/O must produce evidence limits and clarification
+requests, not fabricated facts. English SOAP output and the original-language
+transcript remain unchanged. Prompt-policy and mocked pipeline tests check
+instructions and delivery; they do not prove real model adherence.
 
 ### Access control and resource limits
 
@@ -266,10 +296,12 @@ Run offline checks after installing the pinned requirements:
 python -m unittest discover -s tests -v
 ```
 
-**47 offline tests passed**, with no expected failures. Coverage includes access
+The current **48 offline tests passed** in a fresh Python 3.11 environment using
+the pinned requirements, with no expected failures. They cover access
 control, malformed and oversized input, streaming limits, capacity release,
 SQLite concurrency/retention, source-language handling, English-output policy,
-privacy of failures, Telegram delivery, and complete simulated processing.
+privacy of failures, Telegram delivery, S/O-based A/P policy, and complete
+simulated processing.
 The integration suite runs real app/service/SDK code against in-memory transports
 with fake credentials, synthetic bytes, and temporary databases. Actual HTTP
 transports are blocked in that suite. Mock results do not establish model quality.
@@ -300,6 +332,11 @@ Live verification completed on **2026-10-18**:
 | English voice | Automatic detection retained English transcript; English SOAP preserved the same key facts |
 | Clinical example review | User confirmed both results; S/O retained mild right shoulder pain and 2 sets of 10 exercises, A/P remained unspecified |
 | Live-test cleanup | Temporary audio removed and original webhook restored after each controlled test |
+
+These live voice checks used the earlier source-only A/P policy. The subsequent
+S/O-to-complete-SOAP change passed the 48 offline tests, including updated policy
+and mocked multilingual delivery checks; its generated A/P still need evaluation
+with real model responses and clinician review.
 
 Live inputs were synthetic. The tests exercised receipt handling, local webhook
 logic, real Telegram downloads/replies, and real Groq calls through temporary

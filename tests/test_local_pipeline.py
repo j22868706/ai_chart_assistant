@@ -154,8 +154,10 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         self.note = (
             "S:\nPatient reports right shoulder pain.\n"
             "O:\nCompleted 2 sets of 10 exercises.\n"
-            "A:\nAssessment not provided in the transcript; clinician review required.\n"
-            "P:\nPlan not provided in the transcript; clinician review required."
+            "A:\nAI-assisted assessment draft: Reported shoulder pain warrants clarification; "
+            "exercise completion alone does not establish progress.\n"
+            "P:\nSuggested plan for clinician review: Reassess reported pain during "
+            "the documented exercises before considering progression."
         )
         with patch.object(self.stt, "STT_LANGUAGE", None):
             for update_id, source in enumerate(sources, start=100):

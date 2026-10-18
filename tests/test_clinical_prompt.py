@@ -69,15 +69,28 @@ class ClinicalPolicyTests(unittest.TestCase):
         ):
             self.assertIn(rule, CLINICAL_SOAP_PROMPT)
 
-    def test_missing_sections_and_no_inference_policy_remain_explicit(self):
+    def test_source_facts_and_evidence_limits_remain_explicit(self):
         for sentence in (
             "Subjective information not provided in the transcript.",
             "Objective information not provided in the transcript.",
-            "Assessment not provided in the transcript; clinician review required.",
-            "Plan not provided in the transcript; clinician review required.",
+            "Insufficient S/O evidence for an assessment; clinician clarification required.",
             "Missing information means not provided, not normal, absent, or denied.",
-            "A completed\nintervention does not imply it will continue.",
+            "A completed intervention does not establish an existing plan to continue it.",
             "If clinical statements conflict, retain both",
         ):
             self.assertIn(sentence, CLINICAL_SOAP_PROMPT)
         self.assertNotIn("Patient did not report new subjective concerns during the session.", CLINICAL_SOAP_PROMPT)
+
+    def test_so_input_generates_distinguished_assessment_and_suggested_plan(self):
+        for rule in (
+            "When only S and O are provided, generate a concise clinical interpretation",
+            'AI-assisted assessment draft:',
+            "When only S and O are provided, generate a focused suggested next-session plan",
+            "Suggested plan for clinician review:",
+            "Tie each inference to supplied symptoms",
+            "Do not invent prescribed frequency/duration",
+            "Do not claim\nsuggested treatment or education has already occurred.",
+        ):
+            self.assertIn(rule, CLINICAL_SOAP_PROMPT)
+        self.assertNotIn("Assessment not provided in the transcript; clinician review required.", CLINICAL_SOAP_PROMPT)
+        self.assertNotIn("Plan not provided in the transcript; clinician review required.", CLINICAL_SOAP_PROMPT)
