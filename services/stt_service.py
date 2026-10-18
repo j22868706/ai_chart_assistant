@@ -20,10 +20,8 @@ client = AsyncGroq(api_key=GROQ_API_KEY, timeout=60.0)
 # and is one of the cheapest/most generous Whisper offerings available.
 STT_MODEL = os.environ.get("GROQ_STT_MODEL", "whisper-large-v3-turbo")
 
-# Optional ISO-639-1 language hint (e.g. "en", "zh"). Providing this improves
-# transcription accuracy and speed versus letting Whisper auto-detect the
-# language on every request. Leave unset/empty to auto-detect.
-STT_LANGUAGE = os.environ.get("GROQ_STT_LANGUAGE", "en") or None
+# Leave the optional input-language hint unset/blank for multilingual use.
+STT_LANGUAGE = os.environ.get("GROQ_STT_LANGUAGE", "").strip().lower() or None
 
 
 def _read_file_bytes(path: str) -> bytes:
@@ -35,7 +33,7 @@ def _read_file_bytes(path: str) -> bytes:
 async def transcribe_audio(audio_file_path: str) -> str:
     """Use Groq Whisper API to transcribe an audio file into text."""
     if not os.path.exists(audio_file_path):
-        raise FileNotFoundError(f"Audio file not found: {audio_file_path}")
+        raise FileNotFoundError("Audio file not found")
 
     try:
         # Reading the file is blocking I/O; run it in a thread so it doesn't
@@ -65,16 +63,14 @@ async def transcribe_audio(audio_file_path: str) -> str:
 
         return content.strip()
 
-    except RateLimitError as e:
+    except RateLimitError:
         # Groq's Whisper free tier has a daily request cap. Surface a friendly,
         # actionable message instead of a raw stack trace.
-        logger.warning("Groq STT free-tier rate limit reached: %s", e)
+        logger.warning("stt_rate_limited")
         raise RuntimeError(
             "Groq speech-to-text free-tier usage limit reached. "
             "Please try again in a few minutes."
-        ) from e
-    except (FileNotFoundError, RuntimeError):
-        raise
-    except Exception as e:
-        logger.exception("Groq STT transcription failed")
-        raise RuntimeError(f"Audio transcription failed: {e}") from e
+        ) from None
+    except Exception:
+        logger.error("stt_request_failed")
+        raise RuntimeError("Audio transcription failed") from None

@@ -15,4 +15,4 @@ ENV PORT=8000
 EXPOSE 8000
 
 # Use a shell form so ${PORT} expands correctly at container start.
-CMD uvicorn main:app --host 0.0.0.0 --port ${PORT}
+CMD exec uvicorn main:app --host 0.0.0.0 --port ${PORT}

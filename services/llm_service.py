@@ -27,28 +27,29 @@ async def generate_soap_note(transcript: str) -> str:
     if not transcript or not transcript.strip():
         raise ValueError("Transcript is empty; unable to generate SOAP note")
 
-    prompt = CLINICAL_SOAP_PROMPT.format(transcript=transcript)
-
     try:
         chat_completion = await client.chat.completions.create(
-            messages=[{"role": "user", "content": prompt}],
+            messages=[
+                {"role": "system", "content": CLINICAL_SOAP_PROMPT},
+                {"role": "user", "content": transcript},
+            ],
             model=LLM_MODEL,
-            temperature=0.2,  # Lower randomness to ensure stable medical content
+            temperature=0.2,  # Low temperature does not guarantee clinical accuracy.
         )
-    except RateLimitError as e:
+    except RateLimitError:
         # Groq's free tier has per-minute and per-day request/token caps.
         # Surface a friendly, actionable message instead of a raw stack trace.
-        logger.warning("Groq free-tier rate limit reached: %s", e)
+        logger.warning("llm_rate_limited")
         raise RuntimeError(
             "Groq free-tier usage limit reached (requests or tokens per minute/day). "
             "Please try again in a few minutes."
-        ) from e
-    except Exception as e:
-        logger.exception("Groq LLM call failed")
-        raise RuntimeError(f"Failed to generate SOAP note: {e}") from e
+        ) from None
+    except Exception:
+        logger.error("llm_request_failed")
+        raise RuntimeError("Failed to generate SOAP note") from None
 
     content = chat_completion.choices[0].message.content
-    if not content:
+    if not content or not content.strip():
         raise RuntimeError("LLM returned empty content")
 
     return content.strip()

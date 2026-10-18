@@ -1,566 +1,416 @@
-# AI Chart Assistant — Voice-to-SOAP Note Telegram Bot
+# AI Chart Assistant — Multilingual Voice to English SOAP
 
-An AI-powered clinical documentation assistant that converts spoken therapy-session summaries into structured SOAP notes and delivers them directly through Telegram.
+A Telegram bot that turns spoken therapy-session summaries into **English SOAP
+drafts**, while returning the source-language transcript for clinician review.
 
-Built to address a practical documentation challenge in home health rehabilitation, where therapists often travel between patient visits without immediate access to a workstation.
+Built by an occupational therapist transitioning into software engineering to
+address a practical home-health rehabilitation workflow: documenting visits when
+a workstation is not readily available.
 
-▶️ **[Watch the Demo Video on YouTube](https://www.youtube.com/shorts/8v_rkPxsisM)**
+[Watch the demo](https://www.youtube.com/shorts/8v_rkPxsisM)
 
----
+> This is a technical prototype. Use synthetic data for demonstrations. Generated
+> notes require clinician review and are not an official medical record. Hosting
+> the app locally does not keep data local: Telegram and Groq process the content.
 
-## Overview
+## The problem and approach
 
-**AI Chart Assistant** is an asynchronous, voice-driven clinical documentation pipeline.
+Home-health therapists move between patient visits and may accumulate unfinished
+notes until the end of the day. Dictating a short session summary can reduce the
+friction of organizing documentation after a visit.
 
-A therapist can record a short voice summary of a therapy session and send it to the Telegram bot. The system automatically:
+The bot separates transcription from clinical organization. Groq Whisper
+transcribes the recording with automatic input-language detection. An LLM then
+translates the supplied clinical information into an English SOAP draft. The
+source transcript remains visible so the therapist can check the translation,
+measurements, and omissions against the recording.
 
-1. Receives the Telegram voice message through a webhook
-2. Downloads and temporarily stores the audio file
-3. Converts speech to text using Groq Whisper
-4. Transforms the transcript into a structured SOAP note using an LLM
-5. Returns both the transcript and generated SOAP draft to Telegram
-6. Deletes the temporary audio file after processing
+This project does not measure time saved, clinical effectiveness, or documentation
+accuracy across a patient population. Its demonstrated outcome is a working
+engineering prototype with controlled Chinese and English voice tests.
 
-The generated SOAP note is intended as a **draft for clinician review**, not a replacement for clinical judgment or the official medical record.
+## Example
 
----
+Synthetic Chinese input:
 
-## The Problem
+> 病人表示右肩輕微疼痛，完成肩部運動兩組，每組十次。未提供治療師評估或後續治療計畫。
 
-Home health therapists often spend significant time traveling between patient visits.
+English equivalent:
 
-Unlike clinic-based practitioners, they may not have immediate access to a workstation between sessions, making clinical documentation difficult to complete efficiently.
+> The patient reports mild right shoulder pain and completed two sets of ten
+> shoulder exercises. No therapist assessment or future treatment plan was provided.
 
-This creates two common workflows:
-
-### 1. Document during the session
-
-Typing or writing notes during patient care can interrupt the therapist's interaction with the patient and reduce hands-on treatment time.
-
-### 2. Document after returning home
-
-Multiple unfinished notes can accumulate throughout the day, extending documentation into personal time and increasing administrative burden.
-
-The goal of this project is to turn otherwise unused commute time into an opportunity for documentation **without interrupting patient care**.
-
----
-
-## Solution
-
-The therapist can dictate a short summary immediately after a session using natural language.
-
-For example:
-
-> "Patient reported mild shoulder pain today. We performed shoulder strengthening and range-of-motion exercises. Patient required verbal cues during functional transfers because of decreased balance."
-
-The system converts the spoken summary into a structured clinical note:
+Illustrative English draft:
 
 ```text
-Subjective:
-Patient reported mild shoulder pain.
+S:
+Patient reports mild right shoulder pain.
 
-Objective:
-Patient participated in shoulder strengthening and ROM exercises.
-Verbal cues were required during functional transfers.
+O:
+Patient completed 2 sets of 10 shoulder exercises.
 
-Assessment:
-Patient continues to demonstrate impaired balance affecting
-functional mobility and transfer performance.
+A:
+Assessment not provided in the transcript; clinician review required.
 
-Plan:
-Continue therapeutic exercises, balance training, and functional
-transfer training.
+P:
+Plan not provided in the transcript; clinician review required.
 ```
 
-The therapist can then review and edit the generated draft before entering it into the organization's official documentation system.
+Missing assessment and plan information stays missing. Completed exercises do not
+establish a future treatment plan, and missing symptoms do not mean symptoms were
+denied. The clinician must verify the draft and supply missing information.
 
----
-
-## System Architecture
+## Architecture
 
 ```text
-                 Therapist
-                     │
-                     │ Voice Message
-                     ▼
-             ┌─────────────────┐
-             │  Telegram Bot   │
-             └────────┬────────┘
-                      │
-                      │ POST /webhook
-                      ▼
-             ┌────────────────────────┐
-             │      FastAPI App       │
-             │                        │
-             │  1. Verify webhook     │
-             │     secret             │
-             │                        │
-             │  2. Return HTTP 200    │
-             │     immediately        │
-             │                        │
-             │  3. Background task    │
-             └───────────┬────────────┘
-                         │
-                         ▼
-               Download Telegram Audio
-                         │
-                         ▼
-              ┌─────────────────────┐
-              │ Groq Whisper        │
-              │ whisper-large-v3-   │
-              │ turbo               │
-              └──────────┬──────────┘
-                         │
-                         ▼
-                    Transcript
-                         │
-                         ▼
-              ┌─────────────────────┐
-              │ Groq LLM            │
-              │ openai/gpt-oss-120b │
-              └──────────┬──────────┘
-                         │
-                         ▼
-                    SOAP Draft
-                         │
-                         ▼
-                Telegram Response
-                         │
-                         ▼
-              Temporary Audio Deleted
+Telegram private voice message
+    |
+    v
+FastAPI POST /webhook
+    |-- Verify required webhook secret before JSON parsing
+    |-- Check body size, user allowlist, private chat, voice limits
+    |-- Reserve bounded processing capacity
+    |-- Atomically claim update_id in SQLite
+    |-- Acknowledge accepted update, dispatch in-process background work
+    v
+Stream Telegram audio into a unique bounded temporary file
+    v
+Groq Whisper: automatic input-language detection -> source transcript
+    v
+Groq LLM: source transcript -> English SOAP draft
+    v
+Telegram: source transcript + English draft, split into message chunks
+    v
+Attempt temporary-file cleanup; release processing capacity
 ```
 
----
+| Layer | Technology | Purpose |
+| --- | --- | --- |
+| API | FastAPI / Uvicorn | Webhook validation and asynchronous processing |
+| Messaging | Telegram Bot API | Voice input and draft delivery |
+| HTTP | httpx | Asynchronous requests and bounded audio streaming |
+| Speech | Groq `whisper-large-v3-turbo` | Multilingual transcription |
+| LLM | Groq `openai/gpt-oss-120b` | Translation and English SOAP organization |
+| Receipts | Python SQLite | Persistent update-ID deduplication |
+| Packaging | Python 3.11 / Docker | Pinned dependencies and container entry point |
+| Existing host | Render | Existing webhook service; rollout described below |
 
-## Key Engineering Decisions
+External calls use async clients. Background work remains inside the web process:
+this is not a durable queue, and accepted jobs can be interrupted by a restart.
 
-### Asynchronous Webhook Processing
+## Features and safety controls
 
-Speech-to-text and LLM inference can take several seconds.
+### Multilingual input, English output
 
-Instead of keeping the Telegram webhook request open during the entire AI pipeline, the application:
+Leave `GROQ_STT_LANGUAGE` blank or unset to omit the input-language hint. Explicit
+hints such as `en` or `zh` are optional for deliberate single-language use. They
+do not select the output language: the SOAP system policy always requires English.
 
-1. Receives the webhook
-2. Returns `200 OK` immediately
-3. Hands the processing pipeline to a FastAPI background task
+The app uses the transcription endpoint to preserve the source transcript; the
+LLM performs translation and SOAP organization together. See
+[Groq speech-to-text documentation](https://console.groq.com/docs/speech-to-text)
+for the optional language parameter and endpoint distinction. Language coverage
+is finite; detection and mixed-language accuracy require evaluation.
 
-This prevents Telegram webhook timeouts and reduces the risk of duplicate processing.
+The transcript is passed unchanged as a user message, separate from the system
+policy. Instruction-like source content must not override that policy. The policy
+requires preservation of numbers, units, laterality, negation, assistance levels,
+attribution, and uncertainty. Contradictions stay visible for clarification;
+unclear details must not be guessed. Role separation and prompt instructions do
+not guarantee factual accuracy or resistance to prompt injection.
 
----
+### Access control and resource limits
 
-### Async API Clients
+`TELEGRAM_WEBHOOK_SECRET` and a nonempty `TELEGRAM_ALLOWED_USER_IDS` are required;
+invalid access-control configuration blocks startup. The secret is compared in
+constant time before parsing the body. Only allowlisted non-bot senders in their
+own private chat can dispatch work. Group/channel and unauthorized messages are
+acknowledged as ignored without a Bot reply. See the
+[Telegram webhook contract](https://core.telegram.org/bots/api#setwebhook).
 
-The application uses asynchronous clients for external API requests.
+| Setting | Default | Maximum configurable value |
+| --- | --- | --- |
+| `MAX_WEBHOOK_BYTES` | 65536 (64 KiB) | 1048576 |
+| `MAX_AUDIO_BYTES` | 10485760 (10 MiB) | 20971520 |
+| `MAX_VOICE_SECONDS` | 300 | 3600 |
+| `MAX_CONCURRENT_JOBS` | 2 per process | 16 |
+| `JOB_TIMEOUT_SECONDS` | 180 | 900 |
+
+Limits must be positive integers within these ranges. Request-body and audio
+limits check actual streamed bytes as well as declared sizes. Audio is downloaded
+in chunks; empty audio and compressed HTTP content encodings are rejected.
+Duration is checked against Telegram metadata, not independent audio decoding.
+
+Oversized webhook bodies return 413. Authorized oversized voice metadata returns
+200 with `rejected`, without calling Groq. Full job capacity returns 429 with
+`Retry-After: 10`, without recording a receipt. There is no unbounded waiting
+queue. Run one worker: additional processes multiply the concurrency limit.
+
+### Persistent deduplication
+
+The SQLite store records only `update_id` and the receipt timestamp, with atomic
+claims across concurrent connections. Its default path is
+`state/telegram_updates.sqlite3`; use a separate database per bot. The database
+file is owner-readable/writable only, and newly created state directories have
+owner-only permissions. SQLite work runs off the event loop.
+
+Receipts are retained for 7 days and capped at 100,000 rows. Expiry is pruned when
+new updates arrive, rather than by a timed erasure job. Previously accepted IDs
+return 200 with `duplicate`; storage failure or exhaustion returns 503 without
+dispatching new work. SQLite allocated file size is not an exact byte quota.
+
+This prevents repeated dispatch within the retention window; it is not
+exactly-once execution. Failed, timed-out, or interrupted accepted jobs retain
+their receipts. Resend the voice as a new message to retry intentionally. Deleting
+the database, losing its disk, or receipt expiry removes deduplication protection.
+
+### Delivery, errors, and temporary recordings
+
+Every Telegram chunk, including a fallback, must return HTTP 200 and boolean
+`ok: true`. A confirmed Markdown parsing rejection is retried once as plain text;
+other HTTP, API, or network failures stop further chunks. See the
+[Telegram API response contract](https://core.telegram.org/bots/api#making-requests).
+Earlier chunks may already be delivered when a later chunk fails. A successful
+response indicates acceptance, not that the recipient read the message.
+
+Processing errors produce a fixed retry message. Application logs contain fixed
+event names rather than raw exceptions, credential URLs, chat IDs, paths,
+transcripts, or SOAP content. HTTPX, HTTPCore, and Groq diagnostics are suppressed.
+Failed error notifications are caught separately. Proxies, hosting access logs,
+and custom integrations still need their own review.
+
+Audio uses UUID filenames and cleanup in `finally`. Success, handled failure,
+timeout, and cancellation paths are tested. Failed deletion is logged and may
+leave a recording; forced process termination can bypass cleanup. This is
+best-effort temporary storage, not a guaranteed erasure mechanism. Timeouts also
+do not guarantee cancellation of work already accepted by an external provider.
+
+## Project structure
 
 ```text
-Telegram
-   │
-   ▼
-FastAPI
-   │
-   ├── Async Telegram API
-   │
-   ├── Async Groq STT
-   │
-   └── Async Groq LLM
+main.py                         # Webhook, capacity, download, processing, delivery
+services/
+  stt_service.py                # Source-language transcription
+  llm_service.py                # English SOAP generation
+utils/
+  prompts.py                    # Clinical fidelity and translation policy
+  security.py                   # Required secret and numeric allowlist parsing
+  limits.py                     # Validated limits and per-process capacity
+  update_store.py               # Bounded SQLite receipt store
+  logging_config.py             # Suppress sensitive SDK/HTTP diagnostics
+tests/                          # Offline unit and integration tests
+.env.example                    # Placeholder configuration; no real credentials
+requirements.txt                # Pinned direct and transitive runtime dependencies
+Dockerfile
+README.md
 ```
 
-This prevents slow external API calls from unnecessarily blocking the FastAPI event loop.
+`.env`, temporary recordings, and default SQLite state are excluded from Git and
+Docker build contexts. Never commit real credentials or patient data.
 
----
+## Local setup
 
-### Unique Temporary Audio Files
-
-Each incoming voice message receives a unique `uuid4()` filename.
-
-Instead of:
-
-```text
-temp_voice.ogg
-```
-
-the system creates unique temporary files such as:
-
-```text
-temp_audio/
-├── 2f5c...a91.ogg
-├── 9d21...f34.ogg
-└── 7ab4...c82.ogg
-```
-
-This prevents concurrent requests from overwriting each other's audio files.
-
----
-
-### Guaranteed Temporary File Cleanup
-
-Temporary recordings are removed inside a `finally` block.
-
-```text
-Request
-   │
-   ▼
-Download audio
-   │
-   ▼
-Speech-to-text
-   │
-   ▼
-SOAP generation
-   │
-   ▼
-Send response
-   │
-   ▼
-finally → Delete audio
-```
-
-This ensures temporary recordings are deleted after both successful and failed processing paths.
-
----
-
-### Rate-Limit-Aware Error Handling
-
-External AI APIs may return rate-limit errors.
-
-Instead of exposing raw exceptions to the user, the application catches rate-limit failures and returns a user-friendly response.
-
-```text
-Groq API
-   │
-   ├── Success → Continue pipeline
-   │
-   └── Rate Limit → Friendly retry message
-```
-
-This provides a better user experience while preventing implementation details from being exposed to end users.
-
----
-
-### Telegram Webhook Security
-
-The application optionally supports Telegram's webhook secret token.
-
-When configured, the application validates:
-
-```text
-X-Telegram-Bot-Api-Secret-Token
-```
-
-before processing incoming webhook requests.
-
-This reduces the risk of arbitrary requests being sent to the public webhook endpoint.
-
----
-
-## Project Structure
-
-```text
-soap-note-bot/
-│
-├── main.py
-│   └── FastAPI application, Telegram webhook,
-│       background processing pipeline
-│
-├── services/
-│   ├── stt_service.py
-│   │   └── Speech-to-text service
-│   │
-│   └── llm_service.py
-│       └── SOAP note generation
-│
-├── utils/
-│   └── prompts.py
-│       └── Clinical SOAP prompt template
-│
-├── requirements.txt
-├── Dockerfile
-├── .dockerignore
-├── .gitignore
-├── .env
-└── README.md
-```
-
----
-
-## Tech Stack
-
-| Layer            | Technology                 | Purpose                        |
-| ---------------- | -------------------------- | ------------------------------ |
-| Backend          | Python                     | Application development        |
-| API Framework    | FastAPI                    | Asynchronous webhook server    |
-| Server           | Uvicorn                    | ASGI application server        |
-| Messaging        | Telegram Bot API           | Voice-message interface        |
-| HTTP Client      | httpx                      | Asynchronous API communication |
-| Speech-to-Text   | Groq Whisper               | Voice transcription            |
-| LLM              | Groq `openai/gpt-oss-120b` | SOAP note generation           |
-| Containerization | Docker                     | Reproducible deployment        |
-| Deployment       | Render / Railway           | Cloud hosting                  |
-
----
-
-## End-to-End Workflow
-
-### Step 1 — Voice Input
-
-The therapist records a voice summary through Telegram.
-
-### Step 2 — Webhook Reception
-
-Telegram sends the voice-message event to:
-
-```text
-POST /webhook
-```
-
-The application validates the request and immediately returns `200 OK`.
-
-### Step 3 — Background Processing
-
-FastAPI processes the voice message asynchronously.
-
-The audio file is downloaded and stored temporarily with a unique filename.
-
-### Step 4 — Speech Recognition
-
-The audio is sent to:
-
-```text
-Groq Whisper
-whisper-large-v3-turbo
-```
-
-The resulting transcript becomes the input for the clinical documentation pipeline.
-
-### Step 5 — SOAP Generation
-
-The transcript is passed to the LLM with a clinical SOAP prompt.
-
-The model organizes the information into:
-
-* Subjective
-* Objective
-* Assessment
-* Plan
-
-### Step 6 — Response
-
-The bot sends the therapist:
-
-```text
-Transcript
-
-+
-
-SOAP Note Draft
-```
-
-Long responses are automatically split to respect Telegram's message-length limitations.
-
-### Step 7 — Cleanup
-
-The temporary audio recording is deleted after processing.
-
----
-
-## Local Development
-
-### 1. Clone the repository
+Use Python 3.11. Dependencies were verified with Python 3.11.3 on macOS; use a
+maintained patch release and repeat validation on the actual deployment platform.
 
 ```bash
-git clone <your-repository-url>
-cd soap-note-bot
-```
-
-### 2. Create a virtual environment
-
-```bash
-python -m venv venv
-```
-
-Activate it:
-
-```bash
-# macOS / Linux
+git clone git@github.com:j22868706/ai_chart_assistant.git
+cd ai_chart_assistant
+python3 -m venv venv
 source venv/bin/activate
-
-# Windows
-venv\Scripts\activate
+python -m pip install -r requirements.txt
+python -m pip check
 ```
 
-### 3. Install dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 4. Configure environment variables
-
-Create a `.env` file:
+For a new setup, copy `.env.example` to `.env`. If `.env` already exists, edit it
+instead of overwriting it. Required settings:
 
 ```env
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-GROQ_API_KEY=your_groq_api_key
-
-TELEGRAM_WEBHOOK_SECRET=your_random_secret
-
+TELEGRAM_BOT_TOKEN=replace_with_your_bot_token
+GROQ_API_KEY=replace_with_your_groq_api_key
+TELEGRAM_WEBHOOK_SECRET=replace_with_a_generated_secret
+TELEGRAM_ALLOWED_USER_IDS=replace_with_your_numeric_user_id
 GROQ_STT_MODEL=whisper-large-v3-turbo
-GROQ_STT_LANGUAGE=zh
+GROQ_STT_LANGUAGE=
 GROQ_LLM_MODEL=openai/gpt-oss-120b
+TELEGRAM_UPDATE_DB_PATH=state/telegram_updates.sqlite3
 ```
 
-### 5. Start the application
+Use numeric Telegram user IDs, not usernames or group IDs. Generate a webhook
+secret locally and keep the same value in Telegram registration and the app:
 
 ```bash
-uvicorn main:app --reload --port 8000
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+python -m uvicorn main:app --host 127.0.0.1 --port 8000 --workers 1
 ```
 
-### 6. Test the webhook locally
-
-Telegram requires a publicly accessible HTTPS endpoint for webhooks.
-
-For local development, a tunneling service such as ngrok can be used:
+In another terminal:
 
 ```bash
-ngrok http 8000
+curl --fail http://127.0.0.1:8000/health
 ```
 
-Register the webhook:
+Expected response: `{"status":"ok"}`. This checks local availability, not external
+credentials or inference quality. Restart after configuration changes. Avoid
+`--reload` while processing audio because restarts can interrupt accepted work.
+
+Receiving Telegram webhooks requires a public HTTPS endpoint. Localhost alone
+cannot receive them. Controlled live tests used temporary polling, then restored
+the original webhook; do not switch an active bot's receiving mode casually.
+
+## Validation and engineering lessons
+
+Run offline checks after installing the pinned requirements:
 
 ```bash
-curl -X POST \
-  "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
-  -d "url=https://<your-ngrok-domain>/webhook" \
-  -d "secret_token=<TELEGRAM_WEBHOOK_SECRET>"
+python -m unittest discover -s tests -v
 ```
 
-Send a voice message to the Telegram bot to test the complete pipeline.
+**47 offline tests passed**, with no expected failures. Coverage includes access
+control, malformed and oversized input, streaming limits, capacity release,
+SQLite concurrency/retention, source-language handling, English-output policy,
+privacy of failures, Telegram delivery, and complete simulated processing.
+The integration suite runs real app/service/SDK code against in-memory transports
+with fake credentials, synthetic bytes, and temporary databases. Actual HTTP
+transports are blocked in that suite. Mock results do not establish model quality.
 
----
+Deployment preparation was rechecked on **2026-10-18**:
 
-## Docker
+| Check | Result and scope |
+| --- | --- |
+| Fresh Python 3.11 environment | All 21 dependency pins matched `requirements.txt`; `pip check` and all 47 offline tests passed |
+| Linux container | `linux/amd64` image built successfully; all 21 pins, `pip check`, and all 47 offline tests passed |
+| Container HTTP checks | With fake credentials and networking disabled, `/health` returned 200; missing/wrong webhook secrets returned 403 before JSON parsing |
+| Image contents | Local `.env`, Git metadata, virtual environment, and existing SQLite state were excluded |
+| Container shutdown | After adding `exec` to Docker's startup command, Uvicorn ran as PID 1 and stopped cleanly in approximately 0.32 seconds with exit code 0 |
 
-The project includes a `Dockerfile` for containerized deployment.
+The existing local `venv` differed from 14 required dependency pins, so its
+passing tests alone were insufficient deployment evidence. The fresh environment
+and Linux container checks above used the exact pinned set. These checks did not
+call Telegram or Groq, and do not establish hosted end-to-end behavior.
 
-Build the image:
+Live verification completed on **2026-10-18**:
+
+| Check | Result and scope |
+| --- | --- |
+| Dependency consistency and audit | Candidate runtime set passed `pip check`; `pip-audit` reported no known vulnerabilities at audit time |
+| Actual local server | Uvicorn listened only on loopback; health, rejection paths, clean shutdown, and listener release verified |
+| Telegram credentials and delivery | Bot authentication verified; test message accepted for the verified user |
+| Chinese voice | Automatic detection retained Chinese transcript; English SOAP preserved the synthetic scenario's key facts |
+| English voice | Automatic detection retained English transcript; English SOAP preserved the same key facts |
+| Clinical example review | User confirmed both results; S/O retained mild right shoulder pain and 2 sets of 10 exercises, A/P remained unspecified |
+| Live-test cleanup | Temporary audio removed and original webhook restored after each controlled test |
+
+Live inputs were synthetic. The tests exercised receipt handling, local webhook
+logic, real Telegram downloads/replies, and real Groq calls through temporary
+polling, not a newly deployed hosted webhook. This is a two-case demonstration,
+not a multilingual clinical benchmark. Other languages, accents, mixed-language
+audio, and real-world recordings remain unevaluated.
+
+Two practical defects emerged during validation. An English input-language hint
+was still configured during an early Chinese test; the default is now automatic
+detection. Delivery tests also exposed silently ignored Telegram failures; both
+HTTP status and JSON success are now required, including on formatting fallback.
+These findings explain why pipeline completion and dependency checks alone were
+insufficient to validate the product behavior.
+
+Dependencies are pinned, including indirect packages. Unused `python-multipart`
+was removed, and Uvicorn does not require its optional `standard` extras. Resolve
+updates in a fresh environment, audit the resolved set, and repeat checks before
+replacing pins. A clean audit is time-bounded evidence, not a security guarantee.
+
+## Docker and existing Render service
 
 ```bash
-docker build -t soap-note-bot .
+docker build -t ai-chart-assistant .
+docker run --rm -p 127.0.0.1:8000:8000 --env-file .env ai-chart-assistant
 ```
 
-Run the container:
+This basic run uses container-local receipt storage. Mount persistent storage
+before relying on deduplication across container replacement.
 
-```bash
-docker run -p 8000:8000 --env-file .env soap-note-bot
-```
+The existing webhook host is **Render**. Authenticated service inspection on
+**2026-10-18** confirmed the following configuration before this release:
 
-The same container can be deployed to a cloud container platform without changing the application code.
+| Setting | Inspected state |
+| --- | --- |
+| Service | `ai_chart_assistant`, public URL `https://ai-chart-assistant.onrender.com` |
+| Source | `j22868706/ai_chart_assistant`, branch `main`; auto-deploy on commit enabled |
+| Runtime | Docker, Ohio, Free plan, one instance |
+| Health check | `/health`, saved and confirmed through the service API |
+| Pre-release revision | `a77f1f5a232a45ac9985892699390adff8d51a34`; latest inspected deploy was `live` |
+| Environment | Required variables confirmed present by the operator; values were not retrieved or disclosed |
+| Storage decision | Retain Free plan without a persistent disk |
 
----
+Saving the health-check setting redeployed the pre-release revision; it did not
+release the local multilingual/security changes. Pushing this release to `main`
+will trigger an automatic deployment. Hosted verification of that new revision
+remains pending; local DNS access failed during pre-release checks.
 
-## Deployment
+Without a disk, the default `TELEGRAM_UPDATE_DB_PATH` is
+`state/telegram_updates.sqlite3` on ephemeral storage. An alternative configured
+path on the same ephemeral filesystem does not make it persistent. Receipt loss
+on restart or redeploy can allow a previously accepted update to be processed
+again. Cross-redeploy deduplication is not guaranteed in this configuration.
 
-The application can be deployed to platforms such as:
+Before rolling out this version to the existing service:
 
-* Render
-* Railway
-* Other Docker-compatible cloud platforms
+1. Inspect the linked repository/branch, runtime, deployed revision, auto-deploy
+   policy, environment configuration, instance count, and disk attachment.
+2. Preserve existing Bot/Groq credentials; configure the required webhook secret
+   and numeric user allowlist. Leave `GROQ_STT_LANGUAGE` blank for multilingual use.
+   Do not copy the local `.env` into Git or the container image.
+3. Use one Uvicorn worker/instance and `/health` for health checks. Docker's command
+   binds to `0.0.0.0` and the platform-provided `PORT`; native Python runtimes need
+   an equivalent command, not `python main.py`, which intentionally uses loopback.
+4. If cross-redeploy receipt persistence becomes required, point
+   `TELEGRAM_UPDATE_DB_PATH` at a persistent disk mount. The current rollout
+   intentionally uses ephemeral storage. A disk is a billing/configuration decision, and
+   [attaching one disables zero-downtime deploys](https://render.com/docs/disks).
+   Do not claim cross-redeploy deduplication on ephemeral storage or across
+   independent SQLite files on multiple instances.
+5. Review and deploy a specific source revision with a rollback reference. Keep
+   the existing webhook URL if the service URL is unchanged; changing code alone
+   does not require moving the webhook.
+6. Check build/startup, health, secret rejection, webhook delivery status, and a
+   controlled synthetic Chinese/English voice exchange before marking rollout
+   complete. A platform rollback may not restore changed environment settings;
+   preserve those separately.
 
-A typical production flow is:
+See [Render deployment behavior](https://render.com/docs/deploys) and
+[Render web-service configuration](https://render.com/docs/web-services).
+Do not infer zero downtime for an in-process audio job during a rollout. This
+prototype still needs a durable queue to recover interrupted accepted jobs.
 
-```text
-GitHub
-   │
-   ▼
-Cloud Platform
-   │
-   ▼
-Docker Container
-   │
-   ▼
-FastAPI + Uvicorn
-   │
-   ▼
-Telegram Webhook
-```
+## Privacy, limits, and next work
 
----
+This project is not certified or asserted to comply with HIPAA, GDPR, or other
+healthcare privacy requirements. Real patient use requires an appropriate legal
+and security review of Telegram, Groq, the host, consent, retention, access,
+auditability, and relevant vendor agreements. Model output always requires
+clinician verification against the original recording.
 
-## Cost Optimization
+Completed:
 
-The application was designed around services with free-tier availability during development.
+- [x] Multilingual input with English SOAP policy and source transcript
+- [x] Required webhook secret, numeric user allowlist, private-chat restriction
+- [x] Bounded requests/audio/jobs and safe error reporting
+- [x] Persistent update receipt deduplication with bounded retention
+- [x] Offline pipeline simulation and live Chinese/English synthetic tests
 
-The architecture minimizes infrastructure requirements by using:
+Remaining:
 
-* Serverless-style webhook processing
-* External speech-to-text inference
-* External LLM inference
-* Docker-based deployment
-* Temporary local storage
-* No database requirement for the initial version
+- [ ] Verify rollout of the tested revision on the existing Render service
+- [ ] Durable background jobs and recovery of interrupted accepted work
+- [ ] Per-user quotas and spending controls
+- [ ] Stronger recording lifecycle controls and orphan cleanup
+- [ ] Clinically reviewed multilingual evaluation beyond two examples
+- [ ] Multi-user account management and appropriate audit records
+- [ ] Organization-approved templates and reviewed EHR export
 
-This makes the prototype suitable for experimentation and small-scale individual use.
+## Why I built this
 
-Actual API quotas and pricing may change over time, so production deployments should verify the current provider limits.
-
----
-
-## Privacy & Compliance
-
-**This project is a technical prototype and should not be used with real patient information without appropriate security, privacy, and compliance controls.**
-
-The application processes potentially sensitive clinical information and voice recordings.
-
-The current implementation does **not** provide a complete production-grade healthcare security model.
-
-Important considerations before processing real patient data include:
-
-* Encryption in transit and at rest
-* Authentication and authorization
-* Role-based access control
-* Audit logging
-* Patient consent and notification
-* Data retention and deletion policies
-* Secure secrets management
-* Vendor and API compliance requirements
-* HIPAA/GDPR/local privacy-law considerations where applicable
-
-The current implementation temporarily stores voice recordings during processing and deletes them after the pipeline completes.
-
-The generated SOAP note should always be reviewed by a qualified clinician before being entered into an official medical record.
-
----
-
-## Roadmap
-
-* [ ] Add authentication and multi-therapist support
-* [ ] Add persistent user/session management
-* [ ] Add encrypted storage
-* [ ] Add audit logging
-* [ ] Add automatic startup cleanup for orphaned audio files
-* [ ] Add configurable documentation templates
-* [ ] Support DAP and BIRP notes
-* [ ] Add patient/session linking
-* [ ] Add structured EHR export
-* [ ] Add production-grade monitoring and observability
-* [ ] Add automated tests for the complete processing pipeline
-
----
-
-## Why I Built This
-
-As an occupational therapist transitioning into software engineering, I built this project around a real clinical documentation workflow.
-
-The goal was not only to demonstrate LLM integration, but to solve a practical problem while applying software engineering principles such as:
-
-* Asynchronous API design
-* Webhook processing
-* External API integration
-* Error handling
-* Concurrency safety
-* Temporary file management
-* Containerization
-* Cloud deployment
-* Security and privacy considerations
-
-This project represents the intersection of **healthcare domain knowledge and software engineering**.
+The project combines clinical workflow knowledge with API integration, async
+Python, secure configuration, resource control, and testable failure handling.
+The engineering goal is a useful documentation draft with visible source evidence
+and explicit limits, rather than an unverified promise of autonomous charting.
