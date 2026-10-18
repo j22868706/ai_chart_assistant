@@ -382,6 +382,32 @@ See [Render deployment behavior](https://render.com/docs/deploys) and
 Do not infer zero downtime for an in-process audio job during a rollout. This
 prototype still needs a durable queue to recover interrupted accepted jobs.
 
+### Free-tier keepalive
+
+[Render keepalive](.github/workflows/render-keepalive.yml) uses a standard GitHub
+Actions Ubuntu runner to request the public `/health` endpoint every 10 minutes
+(UTC minutes 3, 13, 23, 33, 43, and 53). It also runs when its workflow file is
+pushed to `main`, and supports **Run workflow** from the repository's Actions tab.
+No secrets, checkout, Telegram messages, or Groq calls are needed. Each run checks
+for HTTP 200 and `{"status":"ok"}`, retries up to three attempts for cold starts,
+and fails if the endpoint remains unhealthy. Runs are restricted to this public
+repository so forks or a switch to private visibility do not incur runner usage.
+
+Standard GitHub-hosted runners are
+[free for public repositories](https://docs.github.com/en/billing/concepts/product-billing/github-actions).
+This is a best-effort way to reduce idle spin-down, not an uptime guarantee:
+[scheduled runs can be delayed or dropped, and are disabled after 60 days of repository inactivity](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
+If disabled, re-enable the workflow in Actions. Disable this workflow to stop
+keepalive requests. Render still shares 750 Free instance hours per workspace
+each month; keeping multiple services active can exhaust that allowance.
+Restarts, spin-downs, and redeploys still lose ephemeral SQLite receipts.
+
+The application revision `2609fe5` was subsequently verified `live` on Render
+after correcting the numeric user allowlist. Its public `/health` returned 200,
+and missing/wrong webhook secrets returned 403. Hosted Chinese/English voice
+verification remains pending. Keepalive-only commits use `[skip render]` to
+avoid redeploying the application for scheduling/documentation changes.
+
 ## Privacy, limits, and next work
 
 This project is not certified or asserted to comply with HIPAA, GDPR, or other
